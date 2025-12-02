@@ -1,4 +1,5 @@
 use arboard::Clipboard;
+use auto_launch::AutoLaunchBuilder;
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
@@ -10,7 +11,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
-use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -19,12 +20,55 @@ struct ClipboardEntry {
     content: String,
 }
 
-fn get_history_path() -> PathBuf {
+fn get_data_dir() -> PathBuf {
     let data_dir = dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("banzai");
     fs::create_dir_all(&data_dir).ok();
-    data_dir.join("clipboard_history.jsonl")
+    data_dir
+}
+
+fn get_history_path() -> PathBuf {
+    get_data_dir().join("clipboard_history.jsonl")
+}
+
+fn get_app_path() -> Option<String> {
+    // .appバンドルのパスを取得
+    std::env::current_exe().ok().and_then(|exe_path| {
+        let path_str = exe_path.to_string_lossy().to_string();
+        // /path/to/Banzai.app/Contents/MacOS/banzai の場合、Banzai.app までを返す
+        if let Some(pos) = path_str.find(".app/") {
+            Some(path_str[..pos + 4].to_string())
+        } else {
+            // 開発中は実行ファイルのパスをそのまま返す
+            Some(path_str)
+        }
+    })
+}
+
+fn create_auto_launch() -> Option<auto_launch::AutoLaunch> {
+    let app_path = get_app_path()?;
+    AutoLaunchBuilder::new()
+        .set_app_name("Banzai")
+        .set_app_path(&app_path)
+        .set_use_launch_agent(true)
+        .build()
+        .ok()
+}
+
+fn is_auto_launch_enabled() -> bool {
+    create_auto_launch()
+        .map(|auto| auto.is_enabled().unwrap_or(false))
+        .unwrap_or(false)
+}
+
+fn set_auto_launch(enabled: bool) -> Result<(), String> {
+    let auto = create_auto_launch().ok_or("Failed to create auto launch")?;
+    if enabled {
+        auto.enable().map_err(|e| e.to_string())
+    } else {
+        auto.disable().map_err(|e| e.to_string())
+    }
 }
 
 const MAX_HISTORY_ENTRIES: usize = 100;
@@ -93,6 +137,7 @@ fn truncate_for_display(s: &str, max_len: usize) -> String {
 struct MenuIds {
     quit_id: tray_icon::menu::MenuId,
     clear_id: tray_icon::menu::MenuId,
+    auto_launch_id: tray_icon::menu::MenuId,
     history_items: Vec<(tray_icon::menu::MenuId, String)>,
 }
 
@@ -123,10 +168,19 @@ fn create_tray_menu(history: &[ClipboardEntry]) -> (Menu, MenuIds) {
     // 区切り線
     menu.append(&PredefinedMenuItem::separator()).unwrap();
 
+    // ログイン時に起動
+    let auto_launch_enabled = is_auto_launch_enabled();
+    let auto_launch_item = CheckMenuItem::new("ログイン時に起動", true, auto_launch_enabled, None);
+    let auto_launch_id = auto_launch_item.id().clone();
+    menu.append(&auto_launch_item).unwrap();
+
     // 履歴クリアボタン
     let clear_item = MenuItem::new("履歴をクリア", !history.is_empty(), None);
     let clear_id = clear_item.id().clone();
     menu.append(&clear_item).unwrap();
+
+    // 区切り線
+    menu.append(&PredefinedMenuItem::separator()).unwrap();
 
     // 終了ボタン
     let quit_item = MenuItem::new("終了", true, None);
@@ -138,6 +192,7 @@ fn create_tray_menu(history: &[ClipboardEntry]) -> (Menu, MenuIds) {
         MenuIds {
             quit_id,
             clear_id,
+            auto_launch_id,
             history_items,
         },
     )
@@ -290,6 +345,18 @@ fn main() {
                 // メニューを更新
                 tray_icon.take();
                 let result = rebuild_tray_icon(&[]);
+                tray_icon = Some(result.0);
+                menu_ids = result.1;
+            } else if menu_event.id == menu_ids.auto_launch_id {
+                // 自動起動をトグル
+                let current = is_auto_launch_enabled();
+                if let Err(e) = set_auto_launch(!current) {
+                    eprintln!("自動起動設定エラー: {}", e);
+                }
+                // メニューを更新
+                let current_history = load_history();
+                tray_icon.take();
+                let result = rebuild_tray_icon(&current_history);
                 tray_icon = Some(result.0);
                 menu_ids = result.1;
             } else {
