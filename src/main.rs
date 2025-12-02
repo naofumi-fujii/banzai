@@ -1,7 +1,7 @@
 use arboard::Clipboard;
 use chrono::{DateTime, Local};
+use device_query::{DeviceQuery, DeviceState, Keycode};
 use mouse_position::mouse_position::Mouse;
-use rdev::{listen, Event as RdevEvent, EventType, Key};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
@@ -311,31 +311,35 @@ enum UserEvent {
 
 fn start_hotkey_listener(hotkey_sender: mpsc::Sender<()>) {
     thread::spawn(move || {
+        let device_state = DeviceState::new();
         let mut last_alt_release: Option<Instant> = None;
         let double_tap_threshold = Duration::from_millis(400);
+        let mut alt_was_pressed = false;
 
-        let callback = move |event: RdevEvent| {
-            // Altキー（左右両方）のリリースを検出
-            if let EventType::KeyRelease(key) = event.event_type {
-                if matches!(key, Key::Alt | Key::AltGr) {
-                    let now = Instant::now();
+        loop {
+            let keys = device_state.get_keys();
+            let alt_pressed = keys.contains(&Keycode::LAlt) || keys.contains(&Keycode::RAlt);
 
-                    if let Some(last_time) = last_alt_release {
-                        if now.duration_since(last_time) < double_tap_threshold {
-                            // ダブルタップ検出！
-                            println!("Alt double-tap detected!");
-                            let _ = hotkey_sender.send(());
-                            last_alt_release = None;
-                            return;
-                        }
+            // Altキーがリリースされた瞬間を検出
+            if alt_was_pressed && !alt_pressed {
+                let now = Instant::now();
+
+                if let Some(last_time) = last_alt_release {
+                    if now.duration_since(last_time) < double_tap_threshold {
+                        // ダブルタップ検出！
+                        println!("Alt double-tap detected!");
+                        let _ = hotkey_sender.send(());
+                        last_alt_release = None;
+                        alt_was_pressed = false;
+                        thread::sleep(Duration::from_millis(10));
+                        continue;
                     }
-                    last_alt_release = Some(now);
                 }
+                last_alt_release = Some(now);
             }
-        };
 
-        if let Err(e) = listen(callback) {
-            eprintln!("ホットキーリスナーエラー: {:?}", e);
+            alt_was_pressed = alt_pressed;
+            thread::sleep(Duration::from_millis(10));
         }
     });
 }
