@@ -47,3 +47,17 @@ Copied content is automatically saved to history.
 
 - macOS: `~/Library/Application Support/banzai/clipboard_history.jsonl`
 
+## Release
+
+To create a new release:
+
+1. Update version in `Cargo.toml`
+2. Commit and push
+3. Create and push a tag:
+   ```bash
+   git tag v0.1.1
+   git push origin v0.1.1
+   ```
+
+The GitHub Actions workflow will automatically build and publish the release.
+
