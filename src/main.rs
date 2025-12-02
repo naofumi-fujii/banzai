@@ -1,5 +1,6 @@
 use arboard::Clipboard;
 use chrono::{DateTime, Local};
+use mouse_position::mouse_position::Mouse;
 use rdev::{listen, Event as RdevEvent, EventType, Key};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
@@ -10,10 +11,13 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
-use tao::event::{Event, StartCause};
+use tao::dpi::{LogicalPosition, LogicalSize};
+use tao::event::{Event, StartCause, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
+use tao::window::WindowBuilder;
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
-use tray_icon::{Icon, TrayIconBuilder, TrayIcon};
+use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
+use wry::WebViewBuilder;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ClipboardEntry {
@@ -160,6 +164,144 @@ fn create_icon() -> Icon {
     Icon::from_rgba(rgba, width, height).expect("Failed to create icon")
 }
 
+fn get_mouse_position() -> (i32, i32) {
+    match Mouse::get_mouse_position() {
+        Mouse::Position { x, y } => (x, y),
+        Mouse::Error => (100, 100), // フォールバック位置
+    }
+}
+
+fn generate_popup_html(history: &[ClipboardEntry]) -> String {
+    let mut items_html = String::new();
+
+    for (idx, entry) in history.iter().rev().take(10).enumerate() {
+        let display_text = truncate_for_display(&entry.content, 60);
+        let escaped_content = entry
+            .content
+            .replace('\\', "\\\\")
+            .replace('\'', "\\'")
+            .replace('\n', "\\n")
+            .replace('\r', "\\r");
+        let time_str = entry.timestamp.format("%H:%M").to_string();
+
+        items_html.push_str(&format!(
+            r#"<div class="item" onclick="selectItem('{}')" data-index="{}">
+                <span class="time">[{}]</span>
+                <span class="content">{}</span>
+            </div>"#,
+            escaped_content,
+            idx,
+            time_str,
+            html_escape(&display_text)
+        ));
+    }
+
+    format!(
+        r#"<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-size: 13px;
+            background: #2d2d2d;
+            color: #e0e0e0;
+            overflow: hidden;
+            border-radius: 8px;
+        }}
+        .header {{
+            padding: 8px 12px;
+            background: #3d3d3d;
+            border-bottom: 1px solid #4d4d4d;
+            font-weight: 600;
+            font-size: 12px;
+            color: #aaa;
+        }}
+        .list {{
+            max-height: 300px;
+            overflow-y: auto;
+        }}
+        .item {{
+            padding: 8px 12px;
+            cursor: pointer;
+            border-bottom: 1px solid #3d3d3d;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: background 0.1s;
+        }}
+        .item:hover {{
+            background: #4a4a4a;
+        }}
+        .item:active {{
+            background: #5a5a5a;
+        }}
+        .time {{
+            color: #888;
+            font-size: 11px;
+            flex-shrink: 0;
+        }}
+        .content {{
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }}
+        .empty {{
+            padding: 20px;
+            text-align: center;
+            color: #888;
+        }}
+        .footer {{
+            padding: 6px 12px;
+            background: #3d3d3d;
+            border-top: 1px solid #4d4d4d;
+            font-size: 11px;
+            color: #666;
+            text-align: center;
+        }}
+    </style>
+</head>
+<body>
+    <div class="header">クリップボード履歴</div>
+    <div class="list">
+        {}
+    </div>
+    <div class="footer">クリックでコピー / Escで閉じる</div>
+    <script>
+        function selectItem(content) {{
+            window.ipc.postMessage('copy:' + content);
+        }}
+        document.addEventListener('keydown', function(e) {{
+            if (e.key === 'Escape') {{
+                window.ipc.postMessage('close');
+            }}
+        }});
+        // フォーカスを受け取る
+        window.focus();
+    </script>
+</body>
+</html>"#,
+        if items_html.is_empty() {
+            r#"<div class="empty">履歴がありません</div>"#.to_string()
+        } else {
+            items_html
+        }
+    )
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
 fn start_hotkey_listener(hotkey_sender: mpsc::Sender<()>) {
     thread::spawn(move || {
         let mut last_alt_release: Option<Instant> = None;
@@ -267,11 +409,37 @@ fn main() {
 
     let menu_channel = MenuEvent::receiver();
 
-    event_loop.run(move |event, _, control_flow| {
+    // ポップアップウィンドウ用の状態
+    let mut popup_window: Option<tao::window::Window> = None;
+    let mut popup_webview: Option<wry::WebView> = None;
+
+    event_loop.run(move |event, event_loop_window_target, control_flow| {
         *control_flow = ControlFlow::Poll;
 
         if let Event::NewEvents(StartCause::Init) = event {
             // Tray icon is already created
+        }
+
+        // ウィンドウイベントの処理
+        if let Event::WindowEvent {
+            event: window_event,
+            window_id,
+            ..
+        } = &event
+        {
+            // ポップアップウィンドウのイベント処理
+            if let Some(ref window) = popup_window {
+                if window.id() == *window_id {
+                    match window_event {
+                        WindowEvent::CloseRequested | WindowEvent::Focused(false) => {
+                            // フォーカスを失った時またはクローズ時にウィンドウを閉じる
+                            popup_webview.take();
+                            popup_window.take();
+                        }
+                        _ => {}
+                    }
+                }
+            }
         }
 
         // Handle menu events
@@ -311,18 +479,59 @@ fn main() {
 
         // Handle hotkey events (Alt double-tap)
         if let Ok(()) = hotkey_receiver.try_recv() {
-            println!("Hotkey activated! Showing clipboard history...");
+            println!("Hotkey activated! Showing clipboard history popup...");
+
+            // 既存のポップアップがあれば閉じる
+            popup_webview.take();
+            popup_window.take();
+
+            // マウス位置を取得
+            let (mouse_x, mouse_y) = get_mouse_position();
+
+            // ポップアップウィンドウを作成
+            let window = WindowBuilder::new()
+                .with_title("クリップボード履歴")
+                .with_inner_size(LogicalSize::new(350.0, 400.0))
+                .with_position(LogicalPosition::new(mouse_x as f64, mouse_y as f64))
+                .with_decorations(false)
+                .with_always_on_top(true)
+                .with_resizable(false)
+                .build(event_loop_window_target)
+                .expect("Failed to create popup window");
+
+            // 履歴を読み込んでHTMLを生成
             let history = load_history();
-            println!("\n=== クリップボード履歴 (最新10件) ===");
-            for entry in history.iter().rev().take(10) {
-                let preview = if entry.content.len() > 60 {
-                    format!("{}...", &entry.content[..60])
-                } else {
-                    entry.content.clone()
-                };
-                println!("[{}] {}", entry.timestamp.format("%m/%d %H:%M:%S"), preview);
-            }
-            println!("=====================================\n");
+            let html = generate_popup_html(&history);
+
+            // WebViewを作成
+            let webview = WebViewBuilder::new()
+                .with_html(&html)
+                .with_ipc_handler(move |message| {
+                    let msg = message.body();
+                    if msg == "close" {
+                        // ウィンドウを閉じるリクエスト（次のイベントループで処理）
+                        println!("Close requested");
+                    } else if let Some(content) = msg.strip_prefix("copy:") {
+                        // コンテンツをクリップボードにコピー
+                        let content = content
+                            .replace("\\n", "\n")
+                            .replace("\\r", "\r")
+                            .replace("\\'", "'")
+                            .replace("\\\\", "\\");
+                        if let Ok(mut clipboard) = Clipboard::new() {
+                            if let Err(e) = clipboard.set_text(content.clone()) {
+                                eprintln!("クリップボードへのコピーに失敗: {}", e);
+                            } else {
+                                println!("コピーしました: {}", truncate_for_display(&content, 50));
+                            }
+                        }
+                    }
+                })
+                .build(&window)
+                .expect("Failed to create webview");
+
+            popup_window = Some(window);
+            popup_webview = Some(webview);
         }
 
         // Small sleep to prevent busy loop
