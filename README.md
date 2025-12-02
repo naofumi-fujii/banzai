@@ -52,11 +52,10 @@ Copied content is automatically saved to history.
 To create a new release:
 
 1. Update version in `Cargo.toml`
-2. Commit and push
-3. Create and push a tag:
+2. Commit the change
+3. Run the release script:
    ```bash
-   git tag v0.1.1
-   git push origin v0.1.1
+   ./scripts/release.sh
    ```
 
 The GitHub Actions workflow will automatically build and publish the release.
