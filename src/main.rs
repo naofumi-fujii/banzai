@@ -34,14 +34,14 @@ fn get_history_path() -> PathBuf {
 
 fn get_app_path() -> Option<String> {
     // .appバンドルのパスを取得
-    std::env::current_exe().ok().and_then(|exe_path| {
+    std::env::current_exe().ok().map(|exe_path| {
         let path_str = exe_path.to_string_lossy().to_string();
         // /path/to/Banzai.app/Contents/MacOS/banzai の場合、Banzai.app までを返す
         if let Some(pos) = path_str.find(".app/") {
-            Some(path_str[..pos + 4].to_string())
+            path_str[..pos + 4].to_string()
         } else {
             // 開発中は実行ファイルのパスをそのまま返す
-            Some(path_str)
+            path_str
         }
     })
 }
@@ -115,7 +115,7 @@ fn load_history() -> Vec<ClipboardEntry> {
     let reader = BufReader::new(file);
     reader
         .lines()
-        .filter_map(|line| line.ok())
+        .map_while(Result::ok)
         .filter_map(|line| serde_json::from_str(&line).ok())
         .collect()
 }
@@ -229,9 +229,9 @@ fn create_icon() -> Icon {
     for y in 0..height {
         for x in 0..width {
             let idx = ((y * width + x) * 4) as usize;
-            let in_clip = x >= 5 && x <= 10 && y <= 3;
-            let in_board = x >= 2 && x <= 13 && y >= 2 && y <= 14;
-            let in_paper = x >= 4 && x <= 11 && y >= 4 && y <= 12;
+            let in_clip = (5..=10).contains(&x) && y <= 3;
+            let in_board = (2..=13).contains(&x) && (2..=14).contains(&y);
+            let in_paper = (4..=11).contains(&x) && (4..=12).contains(&y);
 
             if in_clip {
                 // Clip part - dark gray
@@ -276,30 +276,27 @@ fn start_clipboard_monitor(running: Arc<AtomicBool>, history_changed_sender: mps
         let mut last_content: Option<String> = None;
 
         while running.load(Ordering::Relaxed) {
-            match clipboard.get_text() {
-                Ok(current) => {
-                    let is_new = match &last_content {
-                        Some(last) => last != &current,
-                        None => true,
+            if let Ok(current) = clipboard.get_text() {
+                let is_new = match &last_content {
+                    Some(last) => last != &current,
+                    None => true,
+                };
+
+                if is_new && !current.is_empty() {
+                    let entry = ClipboardEntry {
+                        timestamp: Local::now(),
+                        content: current.clone(),
                     };
 
-                    if is_new && !current.is_empty() {
-                        let entry = ClipboardEntry {
-                            timestamp: Local::now(),
-                            content: current.clone(),
-                        };
-
-                        if let Err(e) = save_entry(&entry) {
-                            eprintln!("保存エラー: {}", e);
-                        } else {
-                            // 履歴変更を通知
-                            let _ = history_changed_sender.send(());
-                        }
-
-                        last_content = Some(current);
+                    if let Err(e) = save_entry(&entry) {
+                        eprintln!("保存エラー: {}", e);
+                    } else {
+                        // 履歴変更を通知
+                        let _ = history_changed_sender.send(());
                     }
+
+                    last_content = Some(current);
                 }
-                Err(_) => {}
             }
 
             thread::sleep(Duration::from_millis(500));
