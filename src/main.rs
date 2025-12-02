@@ -27,6 +27,8 @@ fn get_history_path() -> PathBuf {
     data_dir.join("clipboard_history.jsonl")
 }
 
+const MAX_HISTORY_ENTRIES: usize = 200;
+
 fn save_entry(entry: &ClipboardEntry) -> std::io::Result<()> {
     let path = get_history_path();
     let mut file = OpenOptions::new()
@@ -35,6 +37,31 @@ fn save_entry(entry: &ClipboardEntry) -> std::io::Result<()> {
         .open(&path)?;
     let json = serde_json::to_string(entry)?;
     writeln!(file, "{}", json)?;
+
+    // 履歴件数が上限を超えた場合、古いエントリを削除
+    trim_history_if_needed()?;
+
+    Ok(())
+}
+
+fn trim_history_if_needed() -> std::io::Result<()> {
+    let mut history = load_history();
+    if history.len() > MAX_HISTORY_ENTRIES {
+        // 古いエントリを削除して最新200件のみ保持
+        let start = history.len() - MAX_HISTORY_ENTRIES;
+        history = history.split_off(start);
+
+        // ファイルを書き直す
+        let path = get_history_path();
+        let mut file = OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&path)?;
+        for entry in &history {
+            let json = serde_json::to_string(entry)?;
+            writeln!(file, "{}", json)?;
+        }
+    }
     Ok(())
 }
 
