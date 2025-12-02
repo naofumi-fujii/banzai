@@ -3,6 +3,14 @@ name = "banzai"
 version = "0.1.0"
 edition = "2021"
 
+[package.metadata.bundle]
+name = "Banzai"
+identifier = "com.banzai.clipboard"
+icon = ["icon.png"]
+category = "Utility"
+# LSUIElement = true にすると Dock に表示されない（トレイアプリ向け）
+osx-minimum-system-version = "10.14"
+
 [dependencies]
 arboard = "3"
 chrono = { version = "0.4", features = ["serde"] }
