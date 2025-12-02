@@ -31,37 +31,34 @@ const MAX_HISTORY_ENTRIES: usize = 200;
 
 fn save_entry(entry: &ClipboardEntry) -> std::io::Result<()> {
     let path = get_history_path();
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)?;
-    let json = serde_json::to_string(entry)?;
-    writeln!(file, "{}", json)?;
+
+    // 既存の履歴を読み込み、重複を削除
+    let mut history = load_history();
+    history.retain(|e| e.content != entry.content);
+
+    // 新しいエントリを追加
+    history.push(ClipboardEntry {
+        timestamp: entry.timestamp,
+        content: entry.content.clone(),
+    });
 
     // 履歴件数が上限を超えた場合、古いエントリを削除
-    trim_history_if_needed()?;
-
-    Ok(())
-}
-
-fn trim_history_if_needed() -> std::io::Result<()> {
-    let mut history = load_history();
     if history.len() > MAX_HISTORY_ENTRIES {
-        // 古いエントリを削除して最新200件のみ保持
         let start = history.len() - MAX_HISTORY_ENTRIES;
         history = history.split_off(start);
-
-        // ファイルを書き直す
-        let path = get_history_path();
-        let mut file = OpenOptions::new()
-            .write(true)
-            .truncate(true)
-            .open(&path)?;
-        for entry in &history {
-            let json = serde_json::to_string(entry)?;
-            writeln!(file, "{}", json)?;
-        }
     }
+
+    // ファイルを書き直す
+    let mut file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&path)?;
+    for e in &history {
+        let json = serde_json::to_string(e)?;
+        writeln!(file, "{}", json)?;
+    }
+
     Ok(())
 }
 
