@@ -4,8 +4,14 @@ use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+use tao::event::{Event, StartCause};
+use tao::event_loop::{ControlFlow, EventLoopBuilder};
+use tray_icon::menu::{Menu, MenuEvent, MenuItem};
+use tray_icon::{Icon, TrayIconBuilder};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ClipboardEntry {
@@ -46,48 +52,151 @@ fn load_history() -> Vec<ClipboardEntry> {
         .collect()
 }
 
+fn create_icon() -> Icon {
+    // 16x16 simple clipboard icon (RGBA)
+    let width = 16u32;
+    let height = 16u32;
+    let mut rgba = vec![0u8; (width * height * 4) as usize];
+
+    // Draw a simple clipboard shape
+    for y in 0..height {
+        for x in 0..width {
+            let idx = ((y * width + x) * 4) as usize;
+            let in_clip = x >= 5 && x <= 10 && y <= 3;
+            let in_board = x >= 2 && x <= 13 && y >= 2 && y <= 14;
+            let in_paper = x >= 4 && x <= 11 && y >= 4 && y <= 12;
+
+            if in_clip {
+                // Clip part - dark gray
+                rgba[idx] = 80;
+                rgba[idx + 1] = 80;
+                rgba[idx + 2] = 80;
+                rgba[idx + 3] = 255;
+            } else if in_paper {
+                // Paper - white
+                rgba[idx] = 255;
+                rgba[idx + 1] = 255;
+                rgba[idx + 2] = 255;
+                rgba[idx + 3] = 255;
+            } else if in_board {
+                // Board - brown
+                rgba[idx] = 139;
+                rgba[idx + 1] = 90;
+                rgba[idx + 2] = 43;
+                rgba[idx + 3] = 255;
+            } else {
+                // Transparent
+                rgba[idx] = 0;
+                rgba[idx + 1] = 0;
+                rgba[idx + 2] = 0;
+                rgba[idx + 3] = 0;
+            }
+        }
+    }
+
+    Icon::from_rgba(rgba, width, height).expect("Failed to create icon")
+}
+
+fn start_clipboard_monitor(running: Arc<AtomicBool>) {
+    thread::spawn(move || {
+        let mut clipboard = match Clipboard::new() {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Failed to access clipboard: {}", e);
+                return;
+            }
+        };
+        let mut last_content: Option<String> = None;
+
+        while running.load(Ordering::Relaxed) {
+            match clipboard.get_text() {
+                Ok(current) => {
+                    let is_new = match &last_content {
+                        Some(last) => last != &current,
+                        None => true,
+                    };
+
+                    if is_new && !current.is_empty() {
+                        let entry = ClipboardEntry {
+                            timestamp: Local::now(),
+                            content: current.clone(),
+                        };
+
+                        println!(
+                            "[{}] {}",
+                            entry.timestamp.format("%H:%M:%S"),
+                            if current.len() > 50 {
+                                format!("{}...", &current[..50])
+                            } else {
+                                current.clone()
+                            }
+                        );
+
+                        if let Err(e) = save_entry(&entry) {
+                            eprintln!("保存エラー: {}", e);
+                        }
+
+                        last_content = Some(current);
+                    }
+                }
+                Err(_) => {}
+            }
+
+            thread::sleep(Duration::from_millis(500));
+        }
+    });
+}
+
 fn main() {
     println!("Banzai - Clipboard Monitor");
     println!("履歴保存先: {:?}", get_history_path());
-    println!("Ctrl+C で終了\n");
+    println!("メニューバーに常駐中...\n");
 
-    let mut clipboard = Clipboard::new().expect("Failed to access clipboard");
-    let mut last_content: Option<String> = None;
+    let running = Arc::new(AtomicBool::new(true));
 
-    loop {
-        match clipboard.get_text() {
-            Ok(current) => {
-                let is_new = match &last_content {
-                    Some(last) => last != &current,
-                    None => true,
-                };
+    // Start clipboard monitoring in background thread
+    start_clipboard_monitor(running.clone());
 
-                if is_new && !current.is_empty() {
-                    let entry = ClipboardEntry {
-                        timestamp: Local::now(),
-                        content: current.clone(),
-                    };
+    // Create event loop for tray icon
+    let event_loop = EventLoopBuilder::new().build();
 
-                    println!(
-                        "[{}] {}",
-                        entry.timestamp.format("%H:%M:%S"),
-                        if current.len() > 50 {
-                            format!("{}...", &current[..50])
-                        } else {
-                            current.clone()
-                        }
-                    );
+    // Create tray menu
+    let menu = Menu::new();
+    let history_count = load_history().len();
+    let status_item = MenuItem::new(format!("履歴: {} 件", history_count), false, None);
+    let quit_item = MenuItem::new("終了", true, None);
 
-                    if let Err(e) = save_entry(&entry) {
-                        eprintln!("保存エラー: {}", e);
-                    }
+    menu.append(&status_item).unwrap();
+    menu.append(&quit_item).unwrap();
 
-                    last_content = Some(current);
-                }
-            }
-            Err(_) => {}
+    let quit_id = quit_item.id().clone();
+
+    // Create tray icon
+    let _tray_icon = TrayIconBuilder::new()
+        .with_menu(Box::new(menu))
+        .with_tooltip("Banzai - Clipboard Monitor")
+        .with_icon(create_icon())
+        .build()
+        .expect("Failed to create tray icon");
+
+    let menu_channel = MenuEvent::receiver();
+
+    event_loop.run(move |event, _, control_flow| {
+        *control_flow = ControlFlow::Poll;
+
+        if let Event::NewEvents(StartCause::Init) = event {
+            // Tray icon is already created
         }
 
-        thread::sleep(Duration::from_millis(500));
-    }
+        // Handle menu events
+        if let Ok(event) = menu_channel.try_recv() {
+            if event.id == quit_id {
+                running.store(false, Ordering::Relaxed);
+                *control_flow = ControlFlow::Exit;
+            }
+        }
+
+        // Small sleep to prevent busy loop
+        thread::sleep(Duration::from_millis(100));
+    });
 }
