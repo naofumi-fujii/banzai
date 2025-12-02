@@ -47,10 +47,3 @@ Copied content is automatically saved to history.
 
 - macOS: `~/Library/Application Support/banzai/clipboard_history.jsonl`
 
-## Dependencies
-
-- `arboard` - Clipboard access
-- `chrono` - Timestamps
-- `serde` / `serde_json` - Serialization
-- `dirs` - Platform-specific directory paths
-- `tao` / `tray-icon` - System tray
