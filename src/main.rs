@@ -89,7 +89,13 @@ fn truncate_for_display(s: &str, max_len: usize) -> String {
     }
 }
 
-fn create_tray_menu(history: &[ClipboardEntry]) -> (Menu, tray_icon::menu::MenuId, Vec<(tray_icon::menu::MenuId, String)>) {
+struct MenuIds {
+    quit_id: tray_icon::menu::MenuId,
+    clear_id: tray_icon::menu::MenuId,
+    history_items: Vec<(tray_icon::menu::MenuId, String)>,
+}
+
+fn create_tray_menu(history: &[ClipboardEntry]) -> (Menu, MenuIds) {
     let menu = Menu::new();
 
     // 履歴件数表示
@@ -116,16 +122,21 @@ fn create_tray_menu(history: &[ClipboardEntry]) -> (Menu, tray_icon::menu::MenuI
     // 区切り線
     menu.append(&PredefinedMenuItem::separator()).unwrap();
 
+    // 履歴クリアボタン
+    let clear_item = MenuItem::new("履歴をクリア", !history.is_empty(), None);
+    let clear_id = clear_item.id().clone();
+    menu.append(&clear_item).unwrap();
+
     // 終了ボタン
     let quit_item = MenuItem::new("終了", true, None);
     let quit_id = quit_item.id().clone();
     menu.append(&quit_item).unwrap();
 
-    (menu, quit_id, history_items)
+    (menu, MenuIds { quit_id, clear_id, history_items })
 }
 
-fn rebuild_tray_icon(history: &[ClipboardEntry]) -> (TrayIcon, tray_icon::menu::MenuId, Vec<(tray_icon::menu::MenuId, String)>) {
-    let (menu, quit_id, history_items) = create_tray_menu(history);
+fn rebuild_tray_icon(history: &[ClipboardEntry]) -> (TrayIcon, MenuIds) {
+    let (menu, menu_ids) = create_tray_menu(history);
 
     let tray_icon = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
@@ -134,7 +145,15 @@ fn rebuild_tray_icon(history: &[ClipboardEntry]) -> (TrayIcon, tray_icon::menu::
         .build()
         .expect("Failed to create tray icon");
 
-    (tray_icon, quit_id, history_items)
+    (tray_icon, menu_ids)
+}
+
+fn clear_history() -> std::io::Result<()> {
+    let path = get_history_path();
+    if path.exists() {
+        fs::remove_file(&path)?;
+    }
+    Ok(())
 }
 
 fn create_icon() -> Icon {
@@ -244,7 +263,7 @@ fn main() {
 
     // Create tray icon with history menu
     let history = load_history();
-    let (tray_icon, mut quit_id, mut history_items) = rebuild_tray_icon(&history);
+    let (tray_icon, mut menu_ids) = rebuild_tray_icon(&history);
     let mut tray_icon: Option<TrayIcon> = Some(tray_icon);
     let menu_channel = MenuEvent::receiver();
 
@@ -253,12 +272,22 @@ fn main() {
 
         // Handle menu events
         if let Ok(menu_event) = menu_channel.try_recv() {
-            if menu_event.id == quit_id {
+            if menu_event.id == menu_ids.quit_id {
                 running.store(false, Ordering::Relaxed);
                 *control_flow = ControlFlow::Exit;
+            } else if menu_event.id == menu_ids.clear_id {
+                // 履歴をクリア
+                if let Err(e) = clear_history() {
+                    eprintln!("履歴クリアエラー: {}", e);
+                }
+                // メニューを更新
+                tray_icon.take();
+                let result = rebuild_tray_icon(&[]);
+                tray_icon = Some(result.0);
+                menu_ids = result.1;
             } else {
                 // Check if it's a history item click
-                for (id, content) in &history_items {
+                for (id, content) in &menu_ids.history_items {
                     if menu_event.id == *id {
                         // Copy content to clipboard
                         if let Ok(mut clipboard) = Clipboard::new() {
@@ -279,8 +308,7 @@ fn main() {
             tray_icon.take(); // Drop the old tray icon
             let result = rebuild_tray_icon(&current_history);
             tray_icon = Some(result.0);
-            quit_id = result.1;
-            history_items = result.2;
+            menu_ids = result.1;
         }
 
     });
