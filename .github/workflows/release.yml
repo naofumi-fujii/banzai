@@ -20,6 +20,8 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
 
       - name: Cache cargo registry
         uses: actions/cache@v4
@@ -35,8 +37,19 @@ jobs:
       - name: Install cargo-bundle
         run: cargo install cargo-bundle
 
-      - name: Build release
-        run: cargo build --release
+      - name: Build release (x86_64)
+        run: cargo build --release --target x86_64-apple-darwin
+
+      - name: Build release (arm64)
+        run: cargo build --release --target aarch64-apple-darwin
+
+      - name: Create universal binary
+        run: |
+          mkdir -p target/release
+          lipo -create \
+            target/x86_64-apple-darwin/release/banzai \
+            target/aarch64-apple-darwin/release/banzai \
+            -output target/release/banzai
 
       - name: Create app bundle
         run: cargo bundle --release
