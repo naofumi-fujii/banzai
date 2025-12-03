@@ -46,6 +46,11 @@ echo "SHA256: $SHA256"
 sed -i '' "s/^  version \".*\"/  version \"$VERSION\"/" Casks/banzai.rb
 sed -i '' "s/^  sha256 \".*\"/  sha256 \"$SHA256\"/" Casks/banzai.rb
 
+if [ -z "$(git status --porcelain Casks/banzai.rb)" ]; then
+  echo "Caskは既に最新です"
+  exit 0
+fi
+
 git add Casks/banzai.rb
 git commit -m "Cask: バージョンを${VERSION}に更新"
 git push
