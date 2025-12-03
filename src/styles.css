@@ -14,7 +14,7 @@ body {
 .app {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  min-height: 100vh;
   padding: 8px;
 }
 
@@ -87,9 +87,6 @@ body {
 }
 
 .history-list {
-  flex: 1;
-  overflow-y: auto;
-  overflow-x: visible;
   display: flex;
   flex-direction: column;
   gap: 4px;
