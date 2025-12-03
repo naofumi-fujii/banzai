@@ -258,8 +258,12 @@ fn start_clipboard_monitor(app_handle: AppHandle, running: Arc<AtomicBool>) {
 
 fn show_window_at_mouse(app_handle: &AppHandle) {
     if let Some(window) = app_handle.get_webview_window("main") {
-        // Hide first to ensure re-show works
-        let _ = window.hide();
+        // Only hide if already visible (to trigger re-show)
+        // Skip hide on initial show to prevent flicker
+        let is_visible = window.is_visible().unwrap_or(false);
+        if is_visible {
+            let _ = window.hide();
+        }
 
         // Get the current mouse position using AppleScript (macOS)
         #[cfg(target_os = "macos")]
