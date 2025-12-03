@@ -57,6 +57,9 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           SHA256=$(shasum -a 256 target/release/bundle/osx/Banzai-${{ github.ref_name }}.zip | awk '{print $1}')
 
+          git fetch origin main
+          git checkout main
+
           sed -i '' "s/version \".*\"/version \"${VERSION}\"/" Casks/banzai.rb
           sed -i '' "s/sha256 \".*\"/sha256 \"${SHA256}\"/" Casks/banzai.rb
 
@@ -64,4 +67,4 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Casks/banzai.rb
           git commit -m "Homebrew Cask: ${GITHUB_REF_NAME}に更新"
-          git push origin HEAD:main
+          git push origin main
