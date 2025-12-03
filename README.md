@@ -1,14 +1,17 @@
-# banzai
+# Banzai
 
-A macOS menu bar clipboard history manager.
+A macOS menu bar clipboard history manager built with Tauri 2.
 
 ## Features
 
-- Automatically detects and saves clipboard changes
-- Runs in the menu bar as a background application
-- Persists history in JSONL format
-- Removes duplicate entries (keeps the latest)
-- Clear history from menu
+- **Clipboard Monitoring**: Automatically detects and saves clipboard changes (polling every 500ms)
+- **Menu Bar App**: Runs quietly in the menu bar as a background application
+- **Quick Access**: Double-tap the Option key to instantly open the history window
+- **Search**: Filter clipboard history with real-time search
+- **Theme Support**: System, Light, and Dark themes
+- **Auto Launch**: Option to start automatically at login
+- **Persistent Storage**: History saved in JSONL format (max 100 entries)
+- **Duplicate Removal**: Automatically removes duplicates, keeping the most recent
 
 ## Installation
 
@@ -19,53 +22,49 @@ brew tap naofumi-fujii/banzai
 brew install --cask banzai
 ```
 
-### Build from source
+### Build from Source
+
+Prerequisites:
+- Node.js
+- Rust
 
 ```bash
-cargo build --release
+npm install
+npm run tauri build
 ```
 
-## Build App Bundle
-
-```bash
-cargo install cargo-bundle
-cargo bundle --release
-```
-
-The app bundle is created at `target/release/bundle/osx/Banzai.app`.
-
-To install to Applications:
-```bash
-cp -r target/release/bundle/osx/Banzai.app /Applications/
-```
+The app bundle is created at `src-tauri/target/release/bundle/macos/Banzai.app`.
 
 ## Usage
 
-```bash
-# Run directly
-cargo run
+1. Launch Banzai - a clipboard icon appears in the menu bar
+2. Copy text as usual - it's automatically saved to history
+3. Double-tap the **Option** key to open the history window
+4. Click any entry to copy it back to clipboard (window closes automatically)
+5. Use the search box to filter entries
+6. Right-click the tray icon for options (Clear History, Auto Launch, Quit)
 
-# Or open the app bundle
-open target/release/bundle/osx/Banzai.app
+## Development
+
+```bash
+npm install
+npm run tauri dev
 ```
 
-After launching, a clipboard icon appears in the menu bar.
-Copied content is automatically saved to history.
+## Data Storage
 
-## History Location
-
-- macOS: `~/Library/Application Support/banzai/clipboard_history.jsonl`
+History location: `~/Library/Application Support/banzai/clipboard_history.jsonl`
 
 ## Release
 
-To create a new release:
+Run the interactive release script:
 
-1. Update version in `Cargo.toml`
-2. Commit the change
-3. Run the release script:
-   ```bash
-   ./scripts/release.sh
-   ```
+```bash
+npx tsx scripts/release.ts
+```
 
-The GitHub Actions workflow will automatically build and publish the release.
+This updates the version in all required files and creates a git tag. GitHub Actions will automatically build and publish the release.
 
+## License
+
+MIT

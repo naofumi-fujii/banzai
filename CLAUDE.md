@@ -32,9 +32,9 @@ cd src-tauri && cargo test            # Run Rust tests
 
 ### Release
 ```bash
-./scripts/release.sh 0.X.X            # Update version and create release tag
+npx tsx scripts/release.ts            # Interactive release CLI
 ```
-Version must be updated in multiple files: `Cargo.toml`, `package.json`, `src-tauri/tauri.conf.json`
+Updates version in: `src-tauri/Cargo.toml`, `package.json`, `src-tauri/tauri.conf.json`
 
 ## Architecture
 
