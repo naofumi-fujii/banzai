@@ -12,6 +12,15 @@ A macOS menu bar clipboard history manager.
 
 ## Installation
 
+### Homebrew (recommended)
+
+```bash
+brew tap naofumi-fujii/banzai https://github.com/naofumi-fujii/banzai
+brew install --cask banzai
+```
+
+### Build from source
+
 ```bash
 cargo build --release
 ```
