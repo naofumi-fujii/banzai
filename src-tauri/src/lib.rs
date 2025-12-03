@@ -1,9 +1,6 @@
-#[cfg(target_os = "macos")]
-use macos_accessibility_client::accessibility::application_is_trusted_with_prompt;
 use arboard::Clipboard;
 use auto_launch::AutoLaunchBuilder;
 use chrono::{DateTime, Local};
-use rdev::{listen, Event, EventType, Key};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
@@ -19,6 +16,11 @@ use tauri::{
     AppHandle, Emitter, Listener, Manager, PhysicalPosition,
 };
 
+#[cfg(target_os = "macos")]
+use cocoa::base::{id, nil};
+#[cfg(target_os = "macos")]
+use objc::{class, msg_send, sel, sel_impl};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClipboardEntry {
     pub timestamp: DateTime<Local>,
@@ -27,6 +29,7 @@ pub struct ClipboardEntry {
 
 const MAX_HISTORY_ENTRIES: usize = 100;
 const DOUBLE_TAP_THRESHOLD_MS: u128 = 400;
+const DOUBLE_TAP_COOLDOWN_MS: u128 = 500;
 
 fn get_data_dir() -> PathBuf {
     let data_dir = dirs::data_local_dir()
@@ -253,8 +256,14 @@ fn start_clipboard_monitor(app_handle: AppHandle, running: Arc<AtomicBool>) {
     });
 }
 
-fn show_window_at_mouse(app_handle: &AppHandle) {
+fn toggle_window_at_mouse(app_handle: &AppHandle) {
     if let Some(window) = app_handle.get_webview_window("main") {
+        // If window is visible, hide it
+        if window.is_visible().unwrap_or(false) {
+            let _ = window.hide();
+            return;
+        }
+
         // Get the current mouse position using AppleScript (macOS)
         #[cfg(target_os = "macos")]
         {
@@ -298,64 +307,90 @@ fn show_window_at_mouse(app_handle: &AppHandle) {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn start_hotkey_listener(app_handle: AppHandle) {
+    use std::sync::Mutex;
+    use std::cell::Cell;
+
+    // NSEventMaskFlagsChanged = 1 << 12 = 4096
+    const NS_EVENT_MASK_FLAGS_CHANGED: u64 = 1 << 12;
+    // NSEventModifierFlagOption = 1 << 19
+    const NS_EVENT_MODIFIER_FLAG_OPTION: u64 = 1 << 19;
+
+    println!("[Banzai] Starting hotkey listener with NSEvent...");
+
+    // Use static variables wrapped in Mutex for thread safety
+    static LAST_OPTION_RELEASE: Mutex<Option<Instant>> = Mutex::new(None);
+    static LAST_TRIGGER: Mutex<Option<Instant>> = Mutex::new(None);
+    static OPTION_WAS_PRESSED: Mutex<bool> = Mutex::new(false);
+
+    // Store app_handle in a thread-safe way
+    static APP_HANDLE: Mutex<Option<AppHandle>> = Mutex::new(None);
+    *APP_HANDLE.lock().unwrap() = Some(app_handle);
+
+    // Run on main thread since NSEvent requires it
     thread::spawn(move || {
-        // Check accessibility permission on macOS
-        #[cfg(target_os = "macos")]
-        {
-            let is_trusted = application_is_trusted_with_prompt();
-            println!("[Banzai] Accessibility permission check: {}", is_trusted);
-            if !is_trusted {
-                println!("[Banzai] Accessibility permission not granted. Hotkey listener disabled.");
-                println!("[Banzai] Please grant accessibility permission in System Settings > Privacy & Security > Accessibility");
-                return;
-            }
-            println!("[Banzai] Starting hotkey listener...");
-        }
+        unsafe {
+            let block = block::ConcreteBlock::new(move |event: id| {
+                let modifier_flags: u64 = msg_send![event, modifierFlags];
+                let option_pressed = (modifier_flags & NS_EVENT_MODIFIER_FLAG_OPTION) != 0;
 
-        let mut last_alt_release: Option<Instant> = None;
-        let mut alt_pressed = false;
+                let mut was_pressed = OPTION_WAS_PRESSED.lock().unwrap();
+                let mut last_release = LAST_OPTION_RELEASE.lock().unwrap();
+                let mut last_trigger = LAST_TRIGGER.lock().unwrap();
 
-        let callback = move |event: Event| {
-            match event.event_type {
-                EventType::KeyPress(Key::Alt) => {
-                    println!("[Banzai] Alt key pressed");
-                    alt_pressed = true;
-                }
-                EventType::KeyRelease(Key::Alt) => {
-                    println!("[Banzai] Alt key released, alt_pressed={}", alt_pressed);
-                    if alt_pressed {
-                        alt_pressed = false;
-                        let now = Instant::now();
+                if option_pressed {
+                    // Option key pressed
+                    *was_pressed = true;
+                } else if *was_pressed {
+                    // Option key released
+                    *was_pressed = false;
+                    let now = Instant::now();
 
-                        if let Some(last) = last_alt_release {
-                            let elapsed = now.duration_since(last).as_millis();
-                            println!("[Banzai] Time since last release: {}ms", elapsed);
-                            if elapsed < DOUBLE_TAP_THRESHOLD_MS {
-                                // Double tap detected! Emit event to main thread
-                                println!("[Banzai] Double tap detected! Showing window...");
-                                let _ = app_handle.emit("show-window-at-mouse", ());
-                                last_alt_release = None;
-                                return;
-                            }
+                    // Check cooldown period
+                    if let Some(last_trig) = *last_trigger {
+                        if now.duration_since(last_trig).as_millis() < DOUBLE_TAP_COOLDOWN_MS {
+                            *last_release = None;
+                            return;
                         }
-                        last_alt_release = Some(now);
                     }
-                }
-                // Reset on other key presses
-                EventType::KeyPress(_) => {
-                    last_alt_release = None;
-                }
-                _ => {}
-            }
-        };
 
-        println!("[Banzai] Calling rdev::listen...");
-        if let Err(e) = listen(callback) {
-            println!("[Banzai] rdev::listen error: {:?}", e);
+                    if let Some(last) = *last_release {
+                        let elapsed = now.duration_since(last).as_millis();
+                        if elapsed < DOUBLE_TAP_THRESHOLD_MS {
+                            // Double tap detected!
+                            println!("[Banzai] Option double tap detected! Toggling window...");
+                            if let Some(ref handle) = *APP_HANDLE.lock().unwrap() {
+                                let _ = handle.emit("toggle-window-at-mouse", ());
+                            }
+                            *last_release = None;
+                            *last_trigger = Some(now);
+                            return;
+                        }
+                    }
+                    *last_release = Some(now);
+                }
+            });
+            let block = block.copy();
+
+            let _: id = msg_send![
+                class!(NSEvent),
+                addGlobalMonitorForEventsMatchingMask: NS_EVENT_MASK_FLAGS_CHANGED
+                handler: &*block
+            ];
+
+            println!("[Banzai] NSEvent global monitor registered");
+
+            // Keep the thread alive and run the event loop
+            let run_loop: id = msg_send![class!(NSRunLoop), currentRunLoop];
+            let _: () = msg_send![run_loop, run];
         }
-        println!("[Banzai] rdev::listen ended");
     });
+}
+
+#[cfg(not(target_os = "macos"))]
+fn start_hotkey_listener(_app_handle: AppHandle) {
+    // No-op on non-macOS platforms
 }
 
 fn create_icon() -> Image<'static> {
@@ -484,10 +519,10 @@ pub fn run() {
             // Start hotkey listener for Option key double-tap
             start_hotkey_listener(app.handle().clone());
 
-            // Listen for show-window-at-mouse event from hotkey listener
+            // Listen for toggle-window-at-mouse event from hotkey listener
             let app_handle = app.handle().clone();
-            app.listen("show-window-at-mouse", move |_| {
-                show_window_at_mouse(&app_handle);
+            app.listen("toggle-window-at-mouse", move |_| {
+                toggle_window_at_mouse(&app_handle);
             });
 
             Ok(())
