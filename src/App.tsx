@@ -122,6 +122,10 @@ function App() {
           placeholder="検索..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
         />
         <button
           className="clear-button"
