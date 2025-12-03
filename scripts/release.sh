@@ -61,6 +61,19 @@ if git rev-parse "$TAG" >/dev/null 2>&1; then
   exit 1
 fi
 
+# 確認ダイアログ
+echo ""
+echo "以下の操作を実行します:"
+echo "  1. git push (コミットをプッシュ)"
+echo "  2. git tag $TAG (タグを作成)"
+echo "  3. git push origin $TAG (タグをプッシュ)"
+echo ""
+read -p "続行しますか? [y/N]: " confirm
+if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+  echo "キャンセルしました"
+  exit 0
+fi
+
 # pushしてタグを作成
 git push
 git tag "$TAG"
