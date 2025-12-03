@@ -167,16 +167,7 @@ fn create_tray_menu(
 
     let version_item =
         MenuItem::with_id(app, "version", format!("Banzai v{}", version), false, None::<&str>)?;
-    let status_item = MenuItem::with_id(
-        app,
-        "status",
-        format!("履歴: {} 件", history.len()),
-        false,
-        None::<&str>,
-    )?;
     let separator1 = PredefinedMenuItem::separator(app)?;
-    let show_window = MenuItem::with_id(app, "show_window", "履歴を表示 (Option×2)", true, None::<&str>)?;
-    let separator2 = PredefinedMenuItem::separator(app)?;
 
     let auto_launch_enabled = is_auto_launch_enabled();
     let auto_launch = CheckMenuItem::with_id(
@@ -188,20 +179,17 @@ fn create_tray_menu(
         None::<&str>,
     )?;
     let clear = MenuItem::with_id(app, "clear", "履歴をクリア", !history.is_empty(), None::<&str>)?;
-    let separator3 = PredefinedMenuItem::separator(app)?;
+    let separator2 = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "quit", "終了", true, None::<&str>)?;
 
     let menu = Menu::with_items(
         app,
         &[
             &version_item,
-            &status_item,
             &separator1,
-            &show_window,
-            &separator2,
             &auto_launch,
             &clear,
-            &separator3,
+            &separator2,
             &quit,
         ],
     )?;
@@ -503,13 +491,6 @@ pub fn run() {
                 .menu(&menu)
                 .tooltip("Banzai - Clipboard Monitor (Option×2で表示)")
                 .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show_window" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.center();
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                    }
                     "auto_launch" => {
                         let current = is_auto_launch_enabled();
                         if let Err(e) = set_auto_launch(!current) {
