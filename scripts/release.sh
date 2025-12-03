@@ -33,15 +33,57 @@ if [ -z "$1" ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
   usage
 fi
 
-# Cargo.tomlのバージョンを更新
-if [ -n "$1" ]; then
-  NEW_VERSION="$1"
-  echo "Updating version to $NEW_VERSION..."
-  sed -i '' "s/^version = \".*\"/version = \"$NEW_VERSION\"/" Cargo.toml
-  cargo build --quiet 2>/dev/null || cargo build
-  git add Cargo.toml Cargo.lock
-  git commit -m "バージョンを${NEW_VERSION}に更新"
+# セマンティックバージョンを比較する関数
+# 戻り値: 0 = 等しい, 1 = $1 > $2, 2 = $1 < $2
+version_compare() {
+  if [ "$1" = "$2" ]; then
+    return 0
+  fi
+
+  local IFS=.
+  local i ver1=($1) ver2=($2)
+
+  # 配列の長さを揃える
+  for ((i=${#ver1[@]}; i<${#ver2[@]}; i++)); do
+    ver1[i]=0
+  done
+  for ((i=${#ver2[@]}; i<${#ver1[@]}; i++)); do
+    ver2[i]=0
+  done
+
+  for ((i=0; i<${#ver1[@]}; i++)); do
+    if ((10#${ver1[i]} > 10#${ver2[i]})); then
+      return 1
+    fi
+    if ((10#${ver1[i]} < 10#${ver2[i]})); then
+      return 2
+    fi
+  done
+  return 0
+}
+
+# 現在のバージョンを取得
+CURRENT_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+
+# 指定されたバージョンが現在のバージョン以下かチェック
+NEW_VERSION="$1"
+version_compare "$NEW_VERSION" "$CURRENT_VERSION" || cmp_result=$?
+cmp_result=${cmp_result:-0}
+
+if [ $cmp_result -eq 0 ]; then
+  echo "Error: 指定されたバージョン $NEW_VERSION は現在のバージョン $CURRENT_VERSION と同じです"
+  exit 1
+elif [ $cmp_result -eq 2 ]; then
+  echo "Error: 指定されたバージョン $NEW_VERSION は現在のバージョン $CURRENT_VERSION より低いです"
+  exit 1
 fi
+
+# Cargo.tomlのバージョンを更新
+echo "Updating version to $NEW_VERSION..."
+sed -i '' "s/^version = \".*\"/version = \"$NEW_VERSION\"/" Cargo.toml
+cargo build --quiet 2>/dev/null || cargo build
+git add Cargo.toml Cargo.lock
+git commit -m "バージョンを${NEW_VERSION}に更新"
 
 # Cargo.tomlからバージョンを取得
 VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
