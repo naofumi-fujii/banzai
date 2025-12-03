@@ -79,5 +79,49 @@ git push
 git tag "$TAG"
 git push origin "$TAG"
 
-echo "Done! Release $TAG has been triggered."
+echo "Release $TAG has been triggered."
 echo "Check: https://github.com/naofumi-fujii/banzai/actions"
+echo ""
+echo "GitHub Actionsのリリース完了を待っています..."
+
+# リリースワークフローの完了を待つ
+while true; do
+  STATUS=$(gh run list --workflow=release.yml --limit=1 --json status,conclusion --jq '.[0] | "\(.status) \(.conclusion)"')
+  RUN_STATUS=$(echo "$STATUS" | cut -d' ' -f1)
+  CONCLUSION=$(echo "$STATUS" | cut -d' ' -f2)
+
+  if [ "$RUN_STATUS" = "completed" ]; then
+    if [ "$CONCLUSION" = "success" ]; then
+      echo "リリースワークフローが完了しました"
+      break
+    else
+      echo "Error: リリースワークフローが失敗しました (conclusion: $CONCLUSION)"
+      exit 1
+    fi
+  fi
+
+  echo "  待機中... (status: $RUN_STATUS)"
+  sleep 10
+done
+
+# Caskファイルを更新
+echo ""
+echo "Caskファイルを更新しています..."
+RELEASE_URL="https://github.com/naofumi-fujii/banzai/releases/download/$TAG/Banzai-$TAG.zip"
+SHA256=$(curl -sL "$RELEASE_URL" | shasum -a 256 | cut -d' ' -f1)
+
+if [ -z "$SHA256" ] || [ "$SHA256" = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" ]; then
+  echo "Error: SHA256の取得に失敗しました"
+  exit 1
+fi
+
+sed -i '' "s/^  version \".*\"/  version \"$VERSION\"/" Casks/banzai.rb
+sed -i '' "s/^  sha256 \".*\"/  sha256 \"$SHA256\"/" Casks/banzai.rb
+
+git add Casks/banzai.rb
+git commit -m "Cask: バージョンを${VERSION}に更新"
+git push
+
+echo ""
+echo "Done! Caskも更新されました。"
+echo "brew upgrade --cask banzai でアップグレードできます。"
