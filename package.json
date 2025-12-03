@@ -1,6 +1,6 @@
 {
   "name": "banzai",
-  "version": "0.10.1",
+  "version": "1.0.0",
   "description": "A macOS menu bar clipboard history manager.",
   "type": "module",
   "scripts": {
