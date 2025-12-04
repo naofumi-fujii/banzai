@@ -120,14 +120,6 @@ fn load_history() -> Vec<ClipboardEntry> {
         .collect()
 }
 
-fn clear_history() -> std::io::Result<()> {
-    let path = get_history_path();
-    if path.exists() {
-        fs::remove_file(&path)?;
-    }
-    Ok(())
-}
-
 #[tauri::command]
 fn get_history() -> Vec<ClipboardEntry> {
     let mut history = load_history();
@@ -140,11 +132,6 @@ fn copy_to_clipboard(content: String) -> Result<(), String> {
     let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
     clipboard.set_text(&content).map_err(|e| e.to_string())?;
     Ok(())
-}
-
-#[tauri::command]
-fn clear_all_history() -> Result<(), String> {
-    clear_history().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -368,7 +355,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_history,
             copy_to_clipboard,
-            clear_all_history,
             get_auto_launch_status,
             toggle_auto_launch
         ])

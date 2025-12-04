@@ -25,7 +25,6 @@ const ThemeIcon = ({ theme }: { theme: Theme }) => {
 
 function App() {
   const [history, setHistory] = useState<ClipboardEntry[]>([]);
-  const [searchQuery, setSearchQuery] = useState("");
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [autoLaunch, setAutoLaunch] = useState(false);
   const [theme, setTheme] = useState<Theme>(() => {
@@ -65,13 +64,8 @@ function App() {
       loadHistory();
     });
 
-    const unlistenCleared = listen("history-cleared", () => {
-      setHistory([]);
-    });
-
     return () => {
       unlistenChanged.then((f) => f());
-      unlistenCleared.then((f) => f());
     };
   }, []);
 
@@ -106,21 +100,6 @@ function App() {
     }
   };
 
-  const handleClear = async () => {
-    if (window.confirm("履歴をすべてクリアしますか？")) {
-      try {
-        await invoke("clear_all_history");
-        setHistory([]);
-      } catch (error) {
-        console.error("Failed to clear history:", error);
-      }
-    }
-  };
-
-  const filteredHistory = history.filter((entry) =>
-    entry.content.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
   return (
     <div className="app">
       <header className="header">
@@ -131,27 +110,6 @@ function App() {
         </button>
       </header>
 
-      <div className="search-container">
-        <input
-          type="text"
-          className="search-input"
-          placeholder="検索..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          autoComplete="off"
-          autoCorrect="off"
-          autoCapitalize="off"
-          spellCheck={false}
-        />
-        <button
-          className="clear-button"
-          onClick={handleClear}
-          disabled={history.length === 0}
-        >
-          クリア
-        </button>
-      </div>
-
       <div className="settings-row">
         <label className="auto-launch-toggle">
           <input
@@ -161,20 +119,14 @@ function App() {
           />
           <span>ログイン時に起動</span>
         </label>
-        <span className="history-count">
-          {filteredHistory.length} / {history.length} 件
-        </span>
+        <span className="history-count">{history.length} 件</span>
       </div>
 
       <div className="history-list">
-        {filteredHistory.length === 0 ? (
-          <div className="empty-state">
-            {history.length === 0
-              ? "履歴がありません"
-              : "検索結果がありません"}
-          </div>
+        {history.length === 0 ? (
+          <div className="empty-state">履歴がありません</div>
         ) : (
-          filteredHistory.map((entry, index) => (
+          history.map((entry, index) => (
             <div
               key={`${entry.timestamp}-${index}`}
               className={`history-item ${copiedIndex === index ? "copied" : ""}`}
