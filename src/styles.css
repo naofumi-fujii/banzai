@@ -79,11 +79,31 @@ body {
   cursor: not-allowed;
 }
 
+.settings-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.auto-launch-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: #86868b;
+  cursor: pointer;
+}
+
+.auto-launch-toggle input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
 .history-count {
   font-size: 10px;
   color: #86868b;
-  margin-bottom: 4px;
-  text-align: right;
 }
 
 .history-list {
@@ -267,6 +287,10 @@ body {
     color: #8e8e93;
   }
 
+  body:not([data-theme="light"]) .auto-launch-toggle {
+    color: #8e8e93;
+  }
+
   body:not([data-theme="light"]) .history-count {
     color: #8e8e93;
   }
@@ -361,6 +385,10 @@ body[data-theme="dark"] .search-input:focus {
 
 body[data-theme="dark"] .clear-button:disabled {
   background-color: #38383a;
+  color: #8e8e93;
+}
+
+body[data-theme="dark"] .auto-launch-toggle {
   color: #8e8e93;
 }
 

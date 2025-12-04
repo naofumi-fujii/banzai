@@ -27,6 +27,7 @@ function App() {
   const [history, setHistory] = useState<ClipboardEntry[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [autoLaunch, setAutoLaunch] = useState(false);
   const [theme, setTheme] = useState<Theme>(() => {
     return (localStorage.getItem("theme") as Theme) || "system";
   });
@@ -58,6 +59,7 @@ function App() {
 
   useEffect(() => {
     loadHistory();
+    loadAutoLaunchStatus();
 
     const unlistenChanged = listen<ClipboardEntry>("clipboard-changed", () => {
       loadHistory();
@@ -72,6 +74,25 @@ function App() {
       unlistenCleared.then((f) => f());
     };
   }, []);
+
+  const loadAutoLaunchStatus = async () => {
+    try {
+      const status = await invoke<boolean>("get_auto_launch_status");
+      setAutoLaunch(status);
+    } catch (error) {
+      console.error("Failed to get auto launch status:", error);
+    }
+  };
+
+  const handleAutoLaunchToggle = async () => {
+    try {
+      const newValue = !autoLaunch;
+      await invoke("toggle_auto_launch", { enabled: newValue });
+      setAutoLaunch(newValue);
+    } catch (error) {
+      console.error("Failed to toggle auto launch:", error);
+    }
+  };
 
   const handleCopy = async (content: string, index: number) => {
     try {
@@ -131,8 +152,18 @@ function App() {
         </button>
       </div>
 
-      <div className="history-count">
-        {filteredHistory.length} / {history.length} 件
+      <div className="settings-row">
+        <label className="auto-launch-toggle">
+          <input
+            type="checkbox"
+            checked={autoLaunch}
+            onChange={handleAutoLaunchToggle}
+          />
+          <span>ログイン時に起動</span>
+        </label>
+        <span className="history-count">
+          {filteredHistory.length} / {history.length} 件
+        </span>
       </div>
 
       <div className="history-list">
