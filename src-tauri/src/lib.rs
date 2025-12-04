@@ -9,12 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
-use tauri::{
-    image::Image,
-    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
-    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Listener, Manager, PhysicalPosition,
-};
+use tauri::{AppHandle, Emitter, Listener, Manager, PhysicalPosition};
 
 #[cfg(target_os = "macos")]
 use block2::StackBlock;
@@ -162,55 +157,6 @@ fn toggle_auto_launch(enabled: bool) -> Result<(), String> {
     set_auto_launch(enabled)
 }
 
-fn create_tray_menu(
-    app: &AppHandle,
-    history: &[ClipboardEntry],
-) -> tauri::Result<Menu<tauri::Wry>> {
-    let version = env!("CARGO_PKG_VERSION");
-
-    let version_item = MenuItem::with_id(
-        app,
-        "version",
-        format!("Banzai v{}", version),
-        false,
-        None::<&str>,
-    )?;
-    let separator1 = PredefinedMenuItem::separator(app)?;
-
-    let auto_launch_enabled = is_auto_launch_enabled();
-    let auto_launch = CheckMenuItem::with_id(
-        app,
-        "auto_launch",
-        "ログイン時に起動",
-        true,
-        auto_launch_enabled,
-        None::<&str>,
-    )?;
-    let clear = MenuItem::with_id(
-        app,
-        "clear",
-        "履歴をクリア",
-        !history.is_empty(),
-        None::<&str>,
-    )?;
-    let separator2 = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, "quit", "終了", true, None::<&str>)?;
-
-    let menu = Menu::with_items(
-        app,
-        &[
-            &version_item,
-            &separator1,
-            &auto_launch,
-            &clear,
-            &separator2,
-            &quit,
-        ],
-    )?;
-
-    Ok(menu)
-}
-
 fn start_clipboard_monitor(app_handle: AppHandle, running: Arc<AtomicBool>) {
     thread::spawn(move || {
         let mut clipboard = match Clipboard::new() {
@@ -239,14 +185,6 @@ fn start_clipboard_monitor(app_handle: AppHandle, running: Arc<AtomicBool>) {
                         log::error!("保存エラー: {}", e);
                     } else {
                         let _ = app_handle.emit("clipboard-changed", &entry);
-
-                        // Update tray menu
-                        if let Some(tray) = app_handle.tray_by_id("main") {
-                            let history = load_history();
-                            if let Ok(menu) = create_tray_menu(&app_handle, &history) {
-                                let _ = tray.set_menu(Some(menu));
-                            }
-                        }
                     }
 
                     last_content = Some(current);
@@ -420,45 +358,6 @@ fn start_hotkey_listener(_app_handle: AppHandle) {
     // No-op on non-macOS platforms
 }
 
-fn create_icon() -> Image<'static> {
-    let width = 22u32;
-    let height = 22u32;
-    let mut rgba = vec![0u8; (width * height * 4) as usize];
-
-    for y in 0..height {
-        for x in 0..width {
-            let idx = ((y * width + x) * 4) as usize;
-            let in_clip = (8..=13).contains(&x) && y <= 4;
-            let in_board = (4..=17).contains(&x) && (3..=19).contains(&y);
-            let in_paper = (6..=15).contains(&x) && (5..=17).contains(&y);
-
-            if in_clip {
-                rgba[idx] = 0;
-                rgba[idx + 1] = 0;
-                rgba[idx + 2] = 0;
-                rgba[idx + 3] = 255;
-            } else if in_paper {
-                rgba[idx] = 255;
-                rgba[idx + 1] = 255;
-                rgba[idx + 2] = 255;
-                rgba[idx + 3] = 255;
-            } else if in_board {
-                rgba[idx] = 80;
-                rgba[idx + 1] = 80;
-                rgba[idx + 2] = 80;
-                rgba[idx + 3] = 255;
-            } else {
-                rgba[idx] = 0;
-                rgba[idx + 1] = 0;
-                rgba[idx + 2] = 0;
-                rgba[idx + 3] = 0;
-            }
-        }
-    }
-
-    Image::new_owned(rgba, width, height)
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let running = Arc::new(AtomicBool::new(true));
@@ -474,65 +373,6 @@ pub fn run() {
             toggle_auto_launch
         ])
         .setup(move |app| {
-            let history = load_history();
-            let menu = create_tray_menu(app.handle(), &history)?;
-
-            let _tray = TrayIconBuilder::with_id("main")
-                .icon(create_icon())
-                .menu(&menu)
-                .tooltip("Banzai - Clipboard Monitor (Option×2で表示)")
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "auto_launch" => {
-                        let current = is_auto_launch_enabled();
-                        if let Err(e) = set_auto_launch(!current) {
-                            log::error!("自動起動設定エラー: {}", e);
-                        }
-                        // Update menu
-                        if let Some(tray) = app.tray_by_id("main") {
-                            let history = load_history();
-                            if let Ok(menu) = create_tray_menu(app, &history) {
-                                let _ = tray.set_menu(Some(menu));
-                            }
-                        }
-                    }
-                    "clear" => {
-                        if let Err(e) = clear_history() {
-                            log::error!("履歴クリアエラー: {}", e);
-                        }
-                        let _ = app.emit("history-cleared", ());
-                        // Update menu
-                        if let Some(tray) = app.tray_by_id("main") {
-                            if let Ok(menu) = create_tray_menu(app, &[]) {
-                                let _ = tray.set_menu(Some(menu));
-                            }
-                        }
-                    }
-                    "quit" => {
-                        app.exit(0);
-                    }
-                    _ => {}
-                })
-                .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    } = event
-                    {
-                        let app = tray.app_handle();
-                        if let Some(window) = app.get_webview_window("main") {
-                            if window.is_visible().unwrap_or(false) {
-                                let _ = window.hide();
-                            } else {
-                                let _ = window.center();
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
-                        }
-                    }
-                })
-                .build(app)?;
-
             // Start clipboard monitoring
             start_clipboard_monitor(app.handle().clone(), running_clone.clone());
 
