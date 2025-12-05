@@ -1,5 +1,4 @@
 use arboard::Clipboard;
-use auto_launch::AutoLaunchBuilder;
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
@@ -39,41 +38,6 @@ fn get_data_dir() -> PathBuf {
 
 fn get_history_path() -> PathBuf {
     get_data_dir().join("clipboard_history.jsonl")
-}
-
-fn get_app_path() -> Option<String> {
-    // 常に/Applications/Banzai.appを使用（開発環境でdebugパスが登録されるのを防ぐ）
-    let app_path = "/Applications/Banzai.app";
-    if std::path::Path::new(app_path).exists() {
-        Some(app_path.to_string())
-    } else {
-        None
-    }
-}
-
-fn create_auto_launch() -> Option<auto_launch::AutoLaunch> {
-    let app_path = get_app_path()?;
-    AutoLaunchBuilder::new()
-        .set_app_name("Banzai")
-        .set_app_path(&app_path)
-        .set_use_launch_agent(true)
-        .build()
-        .ok()
-}
-
-fn is_auto_launch_enabled() -> bool {
-    create_auto_launch()
-        .map(|auto| auto.is_enabled().unwrap_or(false))
-        .unwrap_or(false)
-}
-
-fn set_auto_launch(enabled: bool) -> Result<(), String> {
-    let auto = create_auto_launch().ok_or("Failed to create auto launch")?;
-    if enabled {
-        auto.enable().map_err(|e| e.to_string())
-    } else {
-        auto.disable().map_err(|e| e.to_string())
-    }
 }
 
 fn save_entry(entry: &ClipboardEntry) -> std::io::Result<()> {
@@ -131,16 +95,6 @@ fn copy_to_clipboard(content: String) -> Result<(), String> {
     let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
     clipboard.set_text(&content).map_err(|e| e.to_string())?;
     Ok(())
-}
-
-#[tauri::command]
-fn get_auto_launch_status() -> bool {
-    is_auto_launch_enabled()
-}
-
-#[tauri::command]
-fn toggle_auto_launch(enabled: bool) -> Result<(), String> {
-    set_auto_launch(enabled)
 }
 
 fn start_clipboard_monitor(app_handle: AppHandle, running: Arc<AtomicBool>) {
@@ -351,12 +305,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![
-            get_history,
-            copy_to_clipboard,
-            get_auto_launch_status,
-            toggle_auto_launch
-        ])
+        .invoke_handler(tauri::generate_handler![get_history, copy_to_clipboard])
         .setup(move |app| {
             // Start clipboard monitoring
             start_clipboard_monitor(app.handle().clone(), running_clone.clone());
