@@ -145,6 +145,22 @@ fn toggle_pin(timestamp: String, pinned: bool) -> Result<(), String> {
     save_history(&history).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn clear_all_history() -> Result<(), String> {
+    let history = load_history();
+    let pinned: Vec<_> = history.into_iter().filter(|e| e.pinned).collect();
+
+    if pinned.is_empty() {
+        let path = get_history_path();
+        if path.exists() {
+            fs::remove_file(&path).map_err(|e| e.to_string())?;
+        }
+    } else {
+        save_history(&pinned).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 fn start_clipboard_monitor(app_handle: AppHandle, running: Arc<AtomicBool>) {
     thread::spawn(move || {
         let mut clipboard = match Clipboard::new() {
@@ -353,7 +369,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_history,
             copy_to_clipboard,
-            toggle_pin
+            toggle_pin,
+            clear_all_history
         ])
         .setup(move |app| {
             // Start clipboard monitoring

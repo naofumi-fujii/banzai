@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getVersion } from "@tauri-apps/api/app";
-import { Monitor, Sun, Moon } from "lucide-react";
+import { Monitor, Sun, Moon, Trash2 } from "lucide-react";
 
 interface ClipboardEntry {
   timestamp: string;
@@ -149,6 +149,16 @@ function App() {
     }
   };
 
+  const handleClearAll = async () => {
+    try {
+      await invoke("clear_all_history");
+      loadHistory();
+      setSelectedIndex(0);
+    } catch (error) {
+      console.error("Failed to clear history:", error);
+    }
+  };
+
   return (
     <div className="app">
       <header className="header">
@@ -161,6 +171,14 @@ function App() {
 
       <div className="settings-row">
         <span className="history-count">{history.length} 件</span>
+        <button
+          className="clear-button"
+          onClick={handleClearAll}
+          disabled={history.length === 0}
+          title="全件クリア"
+        >
+          <Trash2 size={12} />
+        </button>
       </div>
 
       <div className="history-list" ref={listRef}>
