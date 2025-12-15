@@ -23,6 +23,8 @@ use std::ptr::NonNull;
 pub struct ClipboardEntry {
     pub timestamp: DateTime<Local>,
     pub content: String,
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 const MAX_HISTORY_ENTRIES: usize = 100;
@@ -41,31 +43,60 @@ fn get_history_path() -> PathBuf {
 }
 
 fn save_entry(entry: &ClipboardEntry) -> std::io::Result<()> {
-    let path = get_history_path();
-
     let mut history = load_history();
+
+    // Check if the same content exists and preserve its pinned state
+    let existing_pinned = history
+        .iter()
+        .find(|e| e.content == entry.content)
+        .map(|e| e.pinned)
+        .unwrap_or(false);
+
     history.retain(|e| e.content != entry.content);
 
     history.push(ClipboardEntry {
         timestamp: entry.timestamp,
         content: entry.content.clone(),
+        pinned: existing_pinned,
     });
 
+    // Trim history while preserving pinned items
     if history.len() > MAX_HISTORY_ENTRIES {
-        let start = history.len() - MAX_HISTORY_ENTRIES;
-        history = history.split_off(start);
+        // Separate pinned and unpinned items
+        let pinned: Vec<_> = history.iter().filter(|e| e.pinned).cloned().collect();
+        let mut unpinned: Vec<_> = history.iter().filter(|e| !e.pinned).cloned().collect();
+
+        // Calculate how many unpinned items we can keep
+        let unpinned_limit = MAX_HISTORY_ENTRIES.saturating_sub(pinned.len());
+
+        // Keep only the newest unpinned items
+        if unpinned.len() > unpinned_limit {
+            let start = unpinned.len() - unpinned_limit;
+            unpinned = unpinned.split_off(start);
+        }
+
+        // Rebuild history: unpinned first (older), then pinned
+        history = unpinned;
+        history.extend(pinned);
+
+        // Sort by timestamp to maintain chronological order
+        history.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
     }
 
+    save_history(&history)
+}
+
+fn save_history(history: &[ClipboardEntry]) -> std::io::Result<()> {
+    let path = get_history_path();
     let mut file = OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(true)
         .open(&path)?;
-    for e in &history {
+    for e in history {
         let json = serde_json::to_string(e)?;
         writeln!(file, "{}", json)?;
     }
-
     Ok(())
 }
 
@@ -97,6 +128,23 @@ fn copy_to_clipboard(content: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn toggle_pin(timestamp: String, pinned: bool) -> Result<(), String> {
+    let mut history = load_history();
+
+    // Find the entry by timestamp and update its pinned state
+    if let Some(entry) = history
+        .iter_mut()
+        .find(|e| e.timestamp.to_rfc3339() == timestamp)
+    {
+        entry.pinned = pinned;
+    } else {
+        return Err("Entry not found".to_string());
+    }
+
+    save_history(&history).map_err(|e| e.to_string())
+}
+
 fn start_clipboard_monitor(app_handle: AppHandle, running: Arc<AtomicBool>) {
     thread::spawn(move || {
         let mut clipboard = match Clipboard::new() {
@@ -119,6 +167,7 @@ fn start_clipboard_monitor(app_handle: AppHandle, running: Arc<AtomicBool>) {
                     let entry = ClipboardEntry {
                         timestamp: Local::now(),
                         content: current.clone(),
+                        pinned: false,
                     };
 
                     if let Err(e) = save_entry(&entry) {
@@ -301,7 +350,11 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![get_history, copy_to_clipboard])
+        .invoke_handler(tauri::generate_handler![
+            get_history,
+            copy_to_clipboard,
+            toggle_pin
+        ])
         .setup(move |app| {
             // Start clipboard monitoring
             start_clipboard_monitor(app.handle().clone(), running_clone.clone());

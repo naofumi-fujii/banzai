@@ -8,6 +8,7 @@ import { Monitor, Sun, Moon } from "lucide-react";
 interface ClipboardEntry {
   timestamp: string;
   content: string;
+  pinned: boolean;
 }
 
 type Theme = "system" | "light" | "dark";
@@ -134,6 +135,20 @@ function App() {
     }
   };
 
+  const handleTogglePin = async (
+    e: React.MouseEvent,
+    timestamp: string,
+    currentPinned: boolean
+  ) => {
+    e.stopPropagation();
+    try {
+      await invoke("toggle_pin", { timestamp, pinned: !currentPinned });
+      loadHistory();
+    } catch (error) {
+      console.error("Failed to toggle pin:", error);
+    }
+  };
+
   return (
     <div className="app">
       <header className="header">
@@ -158,10 +173,18 @@ function App() {
               ref={(el) => {
                 itemRefs.current[index] = el;
               }}
-              className={`history-item ${copiedIndex === index ? "copied" : ""} ${selectedIndex === index ? "selected" : ""}`}
+              className={`history-item ${copiedIndex === index ? "copied" : ""} ${selectedIndex === index ? "selected" : ""} ${entry.pinned ? "pinned" : ""}`}
               onClick={() => handleCopy(entry.content, index)}
               onMouseEnter={() => setSelectedIndex(index)}
             >
+              <input
+                type="checkbox"
+                className="pin-checkbox"
+                checked={entry.pinned}
+                onClick={(e) => handleTogglePin(e, entry.timestamp, entry.pinned)}
+                onChange={() => {}}
+                title={entry.pinned ? "Unpin" : "Pin"}
+              />
               <span className="history-content">{entry.content}</span>
               <div className="history-tooltip">{entry.content}</div>
             </div>
