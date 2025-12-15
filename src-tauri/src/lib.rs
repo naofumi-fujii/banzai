@@ -145,40 +145,29 @@ fn show_window_at_mouse(app_handle: &AppHandle) {
             let _ = window.hide();
         }
 
-        // Get the current mouse position using AppleScript (macOS)
+        // Get the current mouse position using CGEvent (macOS)
+        // CGEvent returns coordinates in the global display coordinate system (top-left origin)
+        // which works correctly with multiple monitors
         #[cfg(target_os = "macos")]
         {
-            use std::process::Command;
-            if let Ok(output) = Command::new("osascript")
-                .args([
-                    "-e",
-                    r#"
-                    use framework "Foundation"
-                    use framework "AppKit"
-                    set mouseLocation to current application's NSEvent's mouseLocation()
-                    set screenHeight to (current application's NSScreen's mainScreen()'s frame()'s |size|()'s height) as integer
-                    set x to (mouseLocation's x) as integer
-                    set y to (screenHeight - (mouseLocation's y as integer))
-                    return (x as text) & "," & (y as text)
-                    "#,
-                ])
-                .output()
-            {
-                if let Ok(pos_str) = String::from_utf8(output.stdout) {
-                    let pos_str = pos_str.trim();
-                    let parts: Vec<&str> = pos_str.split(',').collect();
-                    if parts.len() == 2 {
-                        if let (Ok(x), Ok(y)) = (parts[0].parse::<i32>(), parts[1].parse::<i32>()) {
-                            // Window size
-                            let window_width = 400;
+            use core_graphics::event::CGEvent;
+            use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 
-                            // Position window centered horizontally on cursor, slightly below
-                            let new_x = x - window_width / 2;
-                            let new_y = y + 10;
+            if let Ok(source) = CGEventSource::new(CGEventSourceStateID::HIDSystemState) {
+                let event = CGEvent::new(source);
+                if let Ok(event) = event {
+                    let location = event.location();
+                    let x = location.x as i32;
+                    let y = location.y as i32;
 
-                            let _ = window.set_position(PhysicalPosition::new(new_x, new_y));
-                        }
-                    }
+                    // Window size
+                    let window_width = 400;
+
+                    // Position window centered horizontally on cursor, slightly below
+                    let new_x = x - window_width / 2;
+                    let new_y = y + 10;
+
+                    let _ = window.set_position(PhysicalPosition::new(new_x, new_y));
                 }
             }
         }
