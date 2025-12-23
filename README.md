@@ -58,13 +58,26 @@ History location: `~/Library/Application Support/banzai/clipboard_history.jsonl`
 
 ## Release
 
-Run the interactive release script:
+### Using GitHub Actions (Recommended)
+
+1. Go to [Actions](https://github.com/naofumi-fujii/banzai/actions/workflows/release.yml) tab
+2. Click "Run workflow"
+3. Select the version bump type (patch/minor/major)
+4. Click "Run workflow"
+
+The workflow will automatically update versions, create a tag, build universal binaries (x86_64 + arm64), and publish the release.
+
+### Manual Release
+
+Run the release script locally with the desired bump type:
 
 ```bash
-npx tsx scripts/release.ts
+./scripts/release.sh patch   # 0.12.0 -> 0.12.1
+./scripts/release.sh minor   # 0.12.0 -> 0.13.0
+./scripts/release.sh major   # 0.12.0 -> 1.0.0
 ```
 
-This updates the version in all required files and creates a git tag. GitHub Actions will automatically build and publish the release.
+This updates the version in all required files, creates a git commit and tag, and pushes to the repository.
 
 ## License
 
