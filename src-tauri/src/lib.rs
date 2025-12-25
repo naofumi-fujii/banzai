@@ -13,11 +13,15 @@ use tauri::{AppHandle, Emitter, Listener, Manager, PhysicalPosition};
 #[cfg(target_os = "macos")]
 use block2::StackBlock;
 #[cfg(target_os = "macos")]
-use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags};
+use objc2_app_kit::{
+    NSEvent, NSEventMask, NSEventModifierFlags, NSRunningApplication, NSWorkspace,
+};
 #[cfg(target_os = "macos")]
 use objc2_foundation::NSRunLoop;
 #[cfg(target_os = "macos")]
 use std::ptr::NonNull;
+#[cfg(target_os = "macos")]
+use std::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClipboardEntry {
@@ -29,6 +33,9 @@ pub struct ClipboardEntry {
 
 const MAX_HISTORY_ENTRIES: usize = 100;
 const DOUBLE_TAP_THRESHOLD_MS: u128 = 400;
+
+#[cfg(target_os = "macos")]
+static PREVIOUS_APP: Mutex<Option<objc2::rc::Retained<NSRunningApplication>>> = Mutex::new(None);
 
 fn get_data_dir() -> PathBuf {
     let data_dir = dirs::data_local_dir()
@@ -161,6 +168,23 @@ fn clear_all_history() -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn restore_previous_app() -> Result<(), String> {
+    let previous_app = PREVIOUS_APP.lock().unwrap().clone();
+    if let Some(app) = previous_app {
+        // Use empty options set - the default behavior will activate the app
+        app.activateWithOptions(objc2_app_kit::NSApplicationActivationOptions::empty());
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+fn restore_previous_app() -> Result<(), String> {
+    Ok(())
+}
+
 fn start_clipboard_monitor(app_handle: AppHandle, running: Arc<AtomicBool>) {
     thread::spawn(move || {
         let mut clipboard = match Clipboard::new() {
@@ -203,6 +227,22 @@ fn start_clipboard_monitor(app_handle: AppHandle, running: Arc<AtomicBool>) {
 
 fn show_window_at_mouse(app_handle: &AppHandle) {
     if let Some(window) = app_handle.get_webview_window("main") {
+        // Capture the currently active application before showing our window
+        #[cfg(target_os = "macos")]
+        {
+            let workspace = NSWorkspace::sharedWorkspace();
+            if let Some(active_app) = workspace.frontmostApplication() {
+                // Only store if it's not our own app
+                let bundle_id = active_app.bundleIdentifier();
+                if let Some(id) = bundle_id {
+                    let id_str = id.to_string();
+                    if id_str != "com.banzai.clipboard" {
+                        *PREVIOUS_APP.lock().unwrap() = Some(active_app.clone());
+                    }
+                }
+            }
+        }
+
         // Only hide if already visible (to trigger re-show)
         // Skip hide on initial show to prevent flicker
         let is_visible = window.is_visible().unwrap_or(false);
@@ -437,7 +477,8 @@ pub fn run() {
             get_history,
             copy_to_clipboard,
             toggle_pin,
-            clear_all_history
+            clear_all_history,
+            restore_previous_app
         ])
         .setup(move |app| {
             // Start clipboard monitoring

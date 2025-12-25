@@ -129,6 +129,8 @@ function App() {
       setCopiedIndex(index);
       // Close window after copy
       await getCurrentWindow().hide();
+      // Restore focus to the previous application
+      await invoke("restore_previous_app");
       setTimeout(() => setCopiedIndex(null), 1500);
     } catch (error) {
       console.error("Failed to copy:", error);
